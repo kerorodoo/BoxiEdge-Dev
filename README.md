@@ -7,3 +7,7 @@
            (files name refer to docker_run*.sh)
 ### step3: Docker run the image.
 ### step4: In the container. un-tar GTI's tar files, and install sdk.
+           (1. apt install libvtk6-dev )
+           (2. Run install_gtisdk_core.sh)
+           (3. Run install_gti_full_Samples.sh)
+           (4. source ~/.bashrc && ldconfig)
