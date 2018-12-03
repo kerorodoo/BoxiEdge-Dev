@@ -1,5 +1,9 @@
-//uml-diag
-/*<img src="http://y...content-available-to-author-only...l.mediagram/scruffy/class/[ActorComponent||+operation()]&lt;0..*-uses&lt;&gt;[ActorDecorator|-actor_component_vec|+operation();+addcomponent(){bg:orange}], [ActorComponent]^-.-[ActorDecorator], [ActorComponent]^-.-[IActor||+init(...);+operate();+operation()], [IActor]^-.-[Actor_etc..|-in_queue;-out_queue;-thread|+init(...);+operate();+operation()],[IActor]^-.-[Actor_2nd|-in_queue;-out_queue;-thread|+init(...);+operate();+operation()], [IActor]^-.-[VideoReader|-in_queue;-out_queue;-thread|+init(...);+operate();+operation()],[ActorDecorator]^[ActorDecorator_1st], [ActorFactory||+createActorComponent(...){bg:green}]^[ConcreteActorFactory||+createActorComponent(...)], [ConcreteActorFactory]creates-.-&gt;[IActor],[user||main()]uses-&gt;[ActorFactory],[user||main()]uses-&gt;[ActorDecorator],[note: The ActorDecorator is an interface for the process such as Slideshow etc...]-.->[ActorDecorator],[note: The IActor is an interface for smallest unit in a process such as Camera  DataProcess NNInference etc...]-.->[IActor]">*/
+/*
+ * UML-diag Generate At https://yuml.me/diagram/scruffy/class/draw
+ * Content As : [ActorComponent||+operation()]&lt;0..*-uses&lt;&gt;[ActorDecorator|-actor_component_vec|+operation();+addcomponent(){bg:orange}], [ActorComponent]^-.-[ActorDecorator], [ActorComponent]^-.-[IActor||+init(...);+operate();+operation()], [IActor]^-.-[Actor_etc..|-in_queue;-out_queue;-thread|+init(...);+operate();+operation()],[IActor]^-.-[Actor_2nd|-in_queue;-out_queue;-thread|+init(...);+operate();+operation()], [IActor]^-.-[VideoReader|-in_queue;-out_queue;-thread|+init(...);+operate();+operation()],[ActorDecorator]^[ActorDecorator_1st], [ActorFactory||+createActorComponent(...){bg:green}]^[ConcreteActorFactory||+createActorComponent(...)], [ConcreteActorFactory]creates-.-&gt;[IActor],[user||main()]uses-&gt;[ActorFactory],[user||main()]uses-&gt;[ActorDecorator],[note: The ActorDecorator is an interface for the process such as Slideshow etc...]-.->[ActorDecorator],[note: The IActor is an interface for smallest unit in a process such as Camera  DataProcess NNInference etc...]-.->[IActor]
+ * Coding Style Following: https://www.kernel.org/doc/html/v4.10/process/coding-style.html 
+ * Coding Style Following: https://en.cppreference.com
+ */
 
 // Example program
 #include <iostream>
@@ -53,7 +57,7 @@ typedef struct {
 
 class IFrame{
 	public:
-		IFrame():buffer(nullptr){}
+		IFrame(): buffer(nullptr){}
 		~IFrame(){
 			// release resurce
 			cout << "IFrame Release Image" << "\n";
@@ -64,7 +68,7 @@ class IFrame{
 				assert(image.data);
 				image.deallocate();
 				image.release();
-				assert(!image.data);	// check image is NULL
+				assert( !image.data);	// check image is NULL
 			}
 			img.clear();
 			
@@ -78,7 +82,7 @@ class IFrame{
 	public:
 		std::vector<cv::Mat> img;
 		std::vector<BBOX_META> rect_vec;
-		float* buffer;
+		float *buffer;
 };
 
 #define FrameQueue Queue<IFrame*>
@@ -99,7 +103,7 @@ class IActor: public ActorComponent{
 
 class VideoReader: public IActor{
 	public:
-		VideoReader(ACTOR_ARG &actor_arg, FrameQueue& out_queue) {
+		VideoReader(ACTOR_ARG &actor_arg, FrameQueue &out_queue) {
 			_out_queue = &out_queue;
 			_demofile = actor_arg.source;
 			_width1 = actor_arg.width;
@@ -107,13 +111,13 @@ class VideoReader: public IActor{
 		}
 		~VideoReader() {
 			// release resurce
-			while(_thread.joinable())
+			while (_thread.joinable())
 				_thread.join();
 
 			_img.release();
 			_img1.release();
-			assert(!_img.data);
-			assert(!_img1.data);
+			assert( !_img.data);
+			assert( !_img1.data);
 
 			cout << "del_VideoReader" << '\n';
 		}
@@ -125,7 +129,7 @@ class VideoReader: public IActor{
 			std::cout << "Open Video file " << _demofile << " ...\n";
 			_cap.open(_demofile);
 
-			if (!_cap.isOpened())
+			if ( !_cap.isOpened())
 			{
 				_cap.release();
 				std::cerr << "Video Clip File " << _demofile << " is not opened!\n";
@@ -136,7 +140,7 @@ class VideoReader: public IActor{
 			_height  = _cap.get(CV_CAP_PROP_FRAME_HEIGHT);
 			_frame_count  = _cap.get(CV_CAP_PROP_FRAME_COUNT);
 			int video_cc = _cap.get(CV_CAP_PROP_FOURCC);
-			_video_codec  = format("%c%c%c%c", video_cc & 255, (video_cc >> 8 ) & 255, (video_cc >> 16 ) & 255, (video_cc >> 24 ) & 255 );
+			_video_codec  = format("%c%c%c%c", video_cc & 255, (video_cc >> 8) & 255, (video_cc >> 16) & 255, (video_cc >> 24) & 255);
 			_pause_flag = 0;
 
 			_frame_num = 0;
@@ -145,7 +149,7 @@ class VideoReader: public IActor{
 		void operate() {
 			cout << "VideoReader.op " << "\n";
 			int i = 0;
-			while(1)
+			while (1)
 			{
 				i++;
 				if (i > 500)
@@ -177,8 +181,8 @@ class VideoReader: public IActor{
 					// release resurce
 					_img.release();
 					_img1.release();
-					assert(!_img.data);
-					assert(!_img1.data);
+					assert( !_img.data);
+					assert( !_img1.data);
 				}
 				else
 					break;
@@ -187,11 +191,11 @@ class VideoReader: public IActor{
 
 		/*virtual*/
 		void operation() {
-			_thread = thread(&IActor::operate, this);
+			_thread = thread( &IActor::operate, this);
 		}
 
 	private:
-		FrameQueue* _out_queue;
+		FrameQueue *_out_queue;
 		int _width1;
 		int _height1;
 		string _demofile;
@@ -210,20 +214,21 @@ class VideoReader: public IActor{
 
 class ImageShower: public IActor{
 	public:
-		ImageShower(ACTOR_ARG &actor_arg, FrameQueue& in_queue) {
+		ImageShower(ACTOR_ARG &actor_arg, FrameQueue &in_queue) {
 			_in_queue = &in_queue;
 			_window_name = actor_arg.disp_name;
 		}
 		~ImageShower() {
         		// release resurce
-			while(_thread.joinable())
+			while (_thread.joinable())
 				_thread.join();
+                        
 			_img.release();
-			assert(!_img.data);
+			assert( !_img.data);
 
 			delete _iframe;
 			_iframe = nullptr;
-			assert(!_iframe);
+			assert( !_iframe);
 			cout << "del_ImageShower" << '\n';
 		}
 		/*virtual*/
@@ -233,7 +238,7 @@ class ImageShower: public IActor{
 		/*virtual*/
 		void operate() {
 			cout << "ImageShower.op " << "\n";
-			while(1)
+			while (1)
 			{
 				cout << "Queue.size:" << _in_queue->size() << " ... \n";
 				if (_pause_flag == 0 || _in_queue->size() != 0)
@@ -245,7 +250,7 @@ class ImageShower: public IActor{
         				// release resurce
 					_img.deallocate();
 					_img.release();
-					assert(!_img.data);
+					assert( !_img.data);
 
 					_img = _iframe->img[0];
 					//cv::imshow(_window_name, _img);
@@ -254,7 +259,7 @@ class ImageShower: public IActor{
         				// release resurce
 					delete _iframe;
 					_iframe = nullptr;
-					assert(!_iframe);
+					assert( !_iframe);
 				}
 				else
 					break;
@@ -262,7 +267,7 @@ class ImageShower: public IActor{
 		}
 		/*virtual*/
 		void operation() {
-			_thread = thread(&IActor::operate, this);
+			_thread = thread( &IActor::operate, this);
 		}
 	private:
 		FrameQueue* _in_queue;
@@ -276,7 +281,7 @@ class ImageShower: public IActor{
 
 class GTIInferencer: public IActor{
 	public:
-		GTIInferencer(ACTOR_ARG &actor_arg, FrameQueue& in_queue, FrameQueue& out_queue) {
+		GTIInferencer(ACTOR_ARG &actor_arg, FrameQueue &in_queue, FrameQueue &out_queue) {
 			_in_queue = &in_queue;
 			_out_queue = &out_queue;
 
@@ -291,7 +296,7 @@ class GTIInferencer: public IActor{
 
 		}
 		~GTIInferencer() {
-			while(_thread.joinable())
+			while (_thread.joinable())
 				_thread.join();
 
 			if (_output_image_buffer != nullptr)
@@ -318,7 +323,7 @@ class GTIInferencer: public IActor{
 			_device = GtiDeviceCreate(_gti_device_type, (char *)_gti_nn_weight_name.c_str(), (char *)_gti_user_config.c_str());
 
 			// Open device
-			GtiOpenDevice(_device, (char*)_gti_device_name.c_str());	
+			GtiOpenDevice(_device, (char *)_gti_device_name.c_str());	
 
 			// Initialize GTI SDK
 			if (!GtiInitialization(_device))
@@ -330,11 +335,11 @@ class GTIInferencer: public IActor{
 			_output_image_buffer = nullptr;
 			_input_image_buffer = nullptr;
 			_output_image_buffer = new float[GtiGetOutputLength(_device)];	
-			if (!_output_image_buffer)
+			if ( !_output_image_buffer)
 			{
 			}
 			_input_image_buffer = new unsigned char[_gti_input_image_width * _gti_input_image_height * _gti_input_image_channel];
-			if (!_input_image_buffer)
+			if ( !_input_image_buffer)
 			{
 				cout << "GTIInferencer allocation (_input_image_buffer) failed." << "\n";
 			}
@@ -344,12 +349,12 @@ class GTIInferencer: public IActor{
 		void operate() {
 			cout << "GTIInferencer.op " << "\n";
 			int input_length = _gti_input_image_width * _gti_input_image_height * _gti_input_image_channel;
-			while(1)
+			while (1)
 			{
 				cout << "GTIInferencer Queue.size:" << _in_queue->size() << " ... \n";
 				if (_pause_flag == 0 || _in_queue->size() != 0)
 				{
-					IFrame* iframe = _in_queue->pop();
+					IFrame *iframe = _in_queue->pop();
 					
 					cv::Mat img(iframe->img[0]);
 					cv::Mat output(iframe->img[0]);
@@ -364,11 +369,11 @@ class GTIInferencer: public IActor{
 					cvt32FloatTo8Byte((float *)input_image.data, (uchar *)_input_image_buffer, _gti_input_image_width, _gti_input_image_height, _gti_input_image_channel);
 
 					cout << "GTIInferencer Create _nn_output_buffer !" << "\n";					
-					float* _nn_output_buffer = new float[GtiGetOutputLength(_device)];
+					float *_nn_output_buffer = new float[GtiGetOutputLength(_device)];
 
 					cout << "GTIInferencer GtiHandleOneFrameFloat !" << "\n";
 					int ret = GtiHandleOneFrameFloat(_device, _input_image_buffer, input_length,  _nn_output_buffer, GtiGetOutputLength(_device));
-					if (!ret)
+					if ( !ret)
 					{
 						cout << "GTIInferencer Handle one frame error!" << "\n";
 						return;
@@ -388,7 +393,7 @@ class GTIInferencer: public IActor{
 		}
 		/*virtual*/
 		void operation() {
-			_thread = thread(&IActor::operate, this);
+			_thread = thread( &IActor::operate, this);
 		}
 
 		//====================================================================
@@ -428,8 +433,8 @@ class GTIInferencer: public IActor{
 		}
 		
 	private:
-		FrameQueue* _in_queue;
-		FrameQueue* _out_queue;
+		FrameQueue *_in_queue;
+		FrameQueue *_out_queue;
 
 		int _gti_input_image_width;
 		int _gti_input_image_height;
@@ -443,8 +448,8 @@ class GTIInferencer: public IActor{
 
 		thread _thread;
 
-		GtiDevice* _device;
-		float* _output_image_buffer;
+		GtiDevice *_device;
+		float *_output_image_buffer;
 		unsigned char* _input_image_buffer; 
 
 		bool _pause_flag;
@@ -452,19 +457,19 @@ class GTIInferencer: public IActor{
 
 class GTIFcClassify: public IActor{
 	public:
-		GTIFcClassify(ACTOR_ARG &actor_arg, FrameQueue& in_queue) {
+		GTIFcClassify(ACTOR_ARG &actor_arg, FrameQueue &in_queue) {
 			_in_queue = &in_queue;
 
 			_gti_fc_name = actor_arg.gti_fc_name;
 			_gti_fc_label = actor_arg.gti_fc_label;
 		}
 		~GTIFcClassify() {
-			while(_thread.joinable())
+			while (_thread.joinable())
 				_thread.join();
         		// release resurce
 			delete _iframe;
 			_iframe = nullptr;
-			assert(!_iframe);
+			assert( !_iframe);
 			// Release FC
 			GtiClassifyRelease(_gti_classify);
 			cout << "del_GTIFcClassify" << '\n';
@@ -479,13 +484,13 @@ class GTIFcClassify: public IActor{
 		/*virtual*/
 		void operate() {
 			cout << "GTIFcClassify.op " << "\n";
-			while(1)
+			while (1)
 			{
 				cout << "GTIInferencer Queue.size:" << _in_queue->size() << " ... \n";
 				if (_pause_flag == 0 || _in_queue->size() != 0)
 				{
 					_iframe = _in_queue->pop();
-					float* _nn_output_buffer = _iframe->buffer;
+					float *_nn_output_buffer = _iframe->buffer;
 					
 					cout << "GTIFcClassify GtiClassifyFC !" << "\n";
 					GtiClassifyFC(_gti_classify, _nn_output_buffer, 5);
@@ -502,7 +507,7 @@ class GTIFcClassify: public IActor{
         				// release resurce
 					delete _iframe;
 					_iframe = nullptr;
-					assert(!_iframe);
+					assert( !_iframe);
 				}
 				else
 					break;
@@ -510,22 +515,22 @@ class GTIFcClassify: public IActor{
 		}
 		/*virtual*/
 		void operation() {
-			_thread = thread(&IActor::operate, this);
+			_thread = thread( &IActor::operate, this);
 		}
 
 		
 	private:
-		FrameQueue* _in_queue;
+		FrameQueue *_in_queue;
 
 		string _gti_fc_name;
 		string _gti_fc_label;
 
 		thread _thread;
 
-		Classify* _gti_classify;
+		Classify *_gti_classify;
 
 		bool _pause_flag;
-		IFrame* _iframe;
+		IFrame *_iframe;
 };
 
 class ActorDecorator: public ActorComponent {
@@ -533,12 +538,12 @@ class ActorDecorator: public ActorComponent {
 		ActorDecorator() {
 		}
 		~ActorDecorator() {
-			for (ActorComponent* _actor_component: _actor_component_vec)
+			for (ActorComponent* _actor_component : _actor_component_vec)
 				delete _actor_component;
 		}
 		/*virtual*/
 		void operation() {
-			for (ActorComponent* _actor_component: _actor_component_vec)
+			for (ActorComponent* _actor_component : _actor_component_vec)
 				_actor_component->operation();
 		}
 		/*virtual*/
@@ -583,7 +588,7 @@ class ConcreteActorFactory: public ActorFactory{
 			cout << "\n" << "del_ConcreteActorFactory" << "\n";
 		}
 
-		ActorComponent* createActorComponent(ACTOR_ARG &actor_arg, FrameQueue& in_queue, FrameQueue& out_queue){
+		ActorComponent* createActorComponent(ACTOR_ARG &actor_arg, FrameQueue &in_queue, FrameQueue &out_queue){
 
 			cout << "create " << actor_arg.name << "\n"; 
 			if (actor_arg.name == "gti_inferencer")
@@ -595,7 +600,7 @@ class ConcreteActorFactory: public ActorFactory{
 			}
 		}
 
-		ActorComponent* createActorComponent(ACTOR_ARG &actor_arg, FrameQueue& queue){
+		ActorComponent* createActorComponent(ACTOR_ARG &actor_arg, FrameQueue &queue){
 
 			cout << "create " << actor_arg.name << "\n";
 			if (actor_arg.name == "video_reader")
