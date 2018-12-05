@@ -21,12 +21,16 @@
 #include "GtiClassify.h"
 #include "Classify.hpp"
 
+// CaffeInferencer
+#include <caffe/caffe.hpp>
+
 #define ImageQueue Queue<cv::Mat>
 #define StreamQueue Queue<std::ostream>
 #define DATA_PATH  "./";
 
 using namespace std;
 using namespace cv;
+using namespace caffe;  // NOLINT(build/namespaces)
 
 typedef struct {
 	// genernal
@@ -45,9 +49,14 @@ typedef struct {
 	char *gti_device_name;
 	char *gti_nn_weight_name;
 	char *gti_user_config;
-	// GTIFcClassify
+	// GTIFcClassifier
 	char *gti_fc_name;
 	char *gti_fc_label;
+	// CaffeInferencer
+	char *caffe_model_file;
+	char *caffe_trained_file;
+	char *caffe_mean_file;
+	char *caffe_label_file;
 } ACTOR_ARG;
 
 typedef struct {
@@ -455,15 +464,15 @@ class GTIInferencer: public IActor{
 		bool _pause_flag;
 };
 
-class GTIFcClassify: public IActor{
+class GTIFcClassifier: public IActor{
 	public:
-		GTIFcClassify(ACTOR_ARG &actor_arg, FrameQueue &in_queue) {
+		GTIFcClassifier(ACTOR_ARG &actor_arg, FrameQueue &in_queue) {
 			_in_queue = &in_queue;
 
 			_gti_fc_name = actor_arg.gti_fc_name;
 			_gti_fc_label = actor_arg.gti_fc_label;
 		}
-		~GTIFcClassify() {
+		~GTIFcClassifier() {
 			while (_thread.joinable())
 				_thread.join();
         		// release resurce
@@ -471,38 +480,38 @@ class GTIFcClassify: public IActor{
 			_iframe = nullptr;
 			assert( !_iframe);
 			// Release FC
-			GtiClassifyRelease(_gti_classify);
-			cout << "del_GTIFcClassify" << '\n';
+			GtiClassifyRelease(_gti_classifier);
+			cout << "del_GTIFcClassifier" << '\n';
 		}
 		/*virtual*/
 		void init() {
-			cout << "GTIFcClassify.init" << "\n";
-			cout << "GTIFcClassify initialization FC." <<"\n";
-			_gti_classify = GtiClassifyCreate(_gti_fc_name.c_str(), _gti_fc_label.c_str());
+			cout << "GTIFcClassifier.init" << "\n";
+			cout << "GTIFcClassifier initialization FC." <<"\n";
+			_gti_classifier = GtiClassifyCreate(_gti_fc_name.c_str(), _gti_fc_label.c_str());
 						
 		}
 		/*virtual*/
 		void operate() {
-			cout << "GTIFcClassify.op " << "\n";
+			cout << "GTIFcClassifier.op " << "\n";
 			while (1)
 			{
-				cout << "GTIInferencer Queue.size:" << _in_queue->size() << " ... \n";
+				cout << "GTIFcClassifier Queue.size:" << _in_queue->size() << " ... \n";
 				if (_pause_flag == 0 || _in_queue->size() != 0)
 				{
 					_iframe = _in_queue->pop();
 					float *_nn_output_buffer = _iframe->buffer;
 					
 					cout << "GTIFcClassify GtiClassifyFC !" << "\n";
-					GtiClassifyFC(_gti_classify, _nn_output_buffer, 5);
+					GtiClassifyFC(_gti_classifier, _nn_output_buffer, 5);
 
 					/* Print the top N predictions. */	
 					for (int i = 0; i < 5; ++i)
 					{
-						char *ptext = GetPredicationString(_gti_classify, i);
-						cout << "GTIFcClassify ptext: " << ptext << "\n";
+						char *ptext = GetPredicationString(_gti_classifier, i);
+						cout << "GTIFcClassifier ptext: " << ptext << "\n";
 					}
 
-					cout << "GTIFcClassify Release iframe !" << "\n";
+					cout << "GTIFcClassifier Release iframe !" << "\n";
 
         				// release resurce
 					delete _iframe;
@@ -527,7 +536,137 @@ class GTIFcClassify: public IActor{
 
 		thread _thread;
 
-		Classify *_gti_classify;
+		Classify *_gti_classifier;
+
+		bool _pause_flag;
+		IFrame *_iframe;
+};
+
+class CaffeInferencer: public IActor{
+	public:
+		CaffeInferencer(ACTOR_ARG &actor_arg, FrameQueue &in_queue) {
+			_in_queue = &in_queue;
+
+			_caffe_model_file = actor_arg.caffe_model_file;
+			_caffe_trained_file = actor_arg.caffe_trained_file;
+			_caffe_mean_file = actor_arg.caffe_mean_file;
+			_caffe_label_file =  actor_arg.caffe_label_file;
+		}
+		~CaffeInferencer() {
+			while (_thread.joinable())
+				_thread.join();
+			// release resurce
+			delete _iframe;
+			_iframe = nullptr;
+			assert( !_iframe);
+			// Release Classifier
+			cout << "del_CaffeInferencer" << '\n';
+		}
+		/*virtual*/
+		void init() {
+			cout << "CaffeInferencer.init" << "\n";
+			cout << "CaffeInferencer initialization FC." <<"\n";
+
+			Caffe::set_mode(Caffe::CPU);
+			_net.reset(new Net<float>(_caffe_model_file.c_str(), TEST));
+			_net->CopyTrainedLayersFrom(_caffe_trained_file.c_str());
+			_input_layer = _net->input_blobs()[0];
+			//input_geometry_ = cv::Size(input_layer->width(), input_layer->height());
+
+			/* Load the binaryproto mean file. */
+			/* Load labels. */
+	
+		}
+		/*virtual*/
+		void operate() {
+			cout << "CaffeInferencer.op " << "\n";
+			while (1)
+			{
+				cout << "CaffeInferencer Queue.size:" << _in_queue->size() << " ... \n";
+				if (_pause_flag == 0 || _in_queue->size() != 0)
+				{
+					cout << "CaffeInferencer  !" << "\n";
+					_iframe = _in_queue->pop();
+	
+					cv::Mat img(_iframe->img[0]);
+
+					// Wrap the input layer of the network in separate cv::Mat objects
+					cout << "CaffeInferencer  Wrap the input layer !" << "\n";
+					std::vector<cv::Mat> input_channels;
+					int width = _input_layer->width();
+					int height = _input_layer->height();
+					cout << "CaffeInferencer get mutable_cpu_data !" << "\n";
+					float* input_data = _input_layer->mutable_cpu_data();
+					for (int i = 0; i < _input_layer->channels(); ++i) {
+						cv::Mat channel(height, width, CV_32FC1, input_data);
+						cout << "CaffeInferencer Wrap the input layer !" << "\n";
+						input_channels.push_back(channel);
+						input_data += width * height;
+					}
+
+					cout << "CaffeInferencer  Preprocessing  !" << "\n";
+					cv::Mat output(_iframe->img[0]);
+					//std::vector<cv::Mat> input_image;
+					cv::Mat input_image;
+					// converts input image to the float point 3 channel image.
+					//cnnSvicProc32FC3(img, &input_image);
+					//cout << "CaffeInferencer img CV_8U convertTo CV_32F !" << "\n";
+					img.convertTo(input_image, CV_32F);
+
+					cout << "CaffeInferencer  Write image to net  !" << "\n";
+					/* This operation will write the separate BGR planes directly to the
+					 * input layer of the network because it is wrapped by the cv::Mat
+					 * objects in input_channels.
+					 */
+					cv::split(input_image, input_channels);
+
+					cout << "CaffeInferencer Forward  !" << "\n";
+					// Caffe Inference
+					_net->Forward();
+
+					// Copy the output layer to a std::vector
+					Blob<float>* output_layer = _net->output_blobs()[0];
+					const float* begin = output_layer->cpu_data();
+					const float* end = begin + output_layer->channels();
+					std::vector<float>  net_result = std::vector<float>(begin, end);
+	
+					cout << "CaffeInferencer net_result.size: " << net_result.size() << "\n";
+					//N = std::min<int>(labels_.size(), N);
+					//std::vector<int> maxN = Argmax(output, N);
+					//std::vector<Prediction> predictions;
+					//for (int i = 0; i < N; ++i) {
+					//	int idx = maxN[i];
+					//	predictions.push_back(std::make_pair(labels_[idx], output[idx]));
+					//}
+
+					cout << "CaffeInferencer Release iframe !" << "\n";
+					// release resurce
+					delete _iframe;
+					_iframe = nullptr;
+					assert( !_iframe);
+				}
+				else
+					break;
+			}
+		}
+		/*virtual*/
+		void operation() {
+			_thread = thread( &IActor::operate, this);
+		}
+
+	private:
+		FrameQueue *_in_queue;
+
+		string _caffe_model_file;
+		string _caffe_trained_file;
+		string _caffe_mean_file;
+		string _caffe_label_file;
+
+		std::shared_ptr<Net<float> > _net;
+		Blob<float>* _input_layer;
+
+		thread _thread;
+
 
 		bool _pause_flag;
 		IFrame *_iframe;
@@ -617,9 +756,16 @@ class ConcreteActorFactory: public ActorFactory{
 				actor->init();
 				return actor;
 			}
-			if (actor_arg.name == "gti_fc_classify")
+			if (actor_arg.name == "gti_fc_classifier")
 			{
-				IActor *actor = new GTIFcClassify(actor_arg, queue);
+				IActor *actor = new GTIFcClassifier(actor_arg, queue);
+				cout << "init " << actor_arg.name << "\n"; 
+				actor->init();
+				return actor;
+			}
+			if (actor_arg.name == "caffe_inferencer")
+			{
+				IActor *actor = new CaffeInferencer(actor_arg, queue);
 				cout << "init " << actor_arg.name << "\n"; 
 				actor->init();
 				return actor;
@@ -646,17 +792,29 @@ typedef struct {
 	char *gti_device_name;
 	char *gti_nn_weight_name;
 	char *gti_user_config;
-	// GTIFc
+	// GTIFcClassifier
 	char *gti_fc_name;
 	char *gti_fc_label;
+	// CaffeInferencer
+	char *caffe_model_file;
+	char *caffe_trained_file;
+	char *caffe_mean_file;
+	char *caffe_label_file;
 } ACTOR_ARG;
 */
-int main() { 
+int main() {
+
+	int gti_device_type = 0;
+#ifdef USE_PCIE
+	gti_device_type = 2;
+#endif //USE_PCIE
+
 	ACTOR_ARG actorARG[] =
 	{
 		{(char *)"video_reader", (char *)"", (char *)"./VideoDemoFastestMP4.mp4", 224, 224},
-		{(char *)"gti_inferencer", (char *)"", (char *)"", 0, 0, 224, 224, 3, 0, (char*)"0", (char*)"/usr/local/GTISDK/data/Models/gti2801/gnet1/cnn/gnet1_coef_vgg16.dat", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/cnn/userinput.txt"},
-		{(char *)"gti_fc_classify", (char *)"", (char *)"", 0, 0, 224, 224, 3, 0, (char *)"0", (char *)"", (char *)"", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/fc/picture_coef.bin", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/fc/picture_label.txt"},
+		{(char *)"gti_inferencer", (char *)"", (char *)"", 0, 0, 224, 224, 3, gti_device_type, (char*)"0", (char*)"/usr/local/GTISDK/data/Models/gti2801/gnet1/cnn/gnet1_coef_vgg16.dat", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/cnn/userinput.txt"},
+		{(char *)"gti_fc_classifier", (char *)"", (char *)"", 0, 0, 224, 224, 3, 0, (char *)"0", (char *)"", (char *)"", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/fc/picture_coef.bin", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/fc/picture_label.txt"},
+		{(char *)"caffe_inferencer", (char *)"", (char *)"", 0, 0, 0, 0, 0, 0, (char *)"0", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"/root/workspaces/vgg_yolo/gnet_deploy.prototxt", (char *)"/root/workspaces/vgg_yolo/gnet_yolo_iter_32000.caffemodel", (char *)"", (char *)"" },
 		{(char *)"image_shower", (char *)"disp3", (char *)"", 0, 0}
 	};
 	FrameQueue  m_queue;
@@ -666,9 +824,7 @@ int main() {
 
 	ActorFactory *actor_factory = new ConcreteActorFactory();
 	ActorComponent *slideshow = (new ActorDecorator_1st())->addcomponent(
-			actor_factory->createActorComponent(actorARG[2], n_queue))->addcomponent(
-			actor_factory->createActorComponent(actorARG[2], n_queue))->addcomponent(
-			actor_factory->createActorComponent(actorARG[1], m_queue, n_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG[3], m_queue))->addcomponent(
 			actor_factory->createActorComponent(actorARG[0], m_queue)
 			);
 
