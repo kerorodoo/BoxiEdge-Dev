@@ -274,7 +274,7 @@ class ImageReader: public IActor{
 			cout << "ImageReader.op " << "\n";
 			int i = 0;
         		_dir = opendir(_demo_dir.c_str());
-			if (NULL == _dir)
+			if (nullptr == _dir)
 			{
 				// could not open directory
 				std::cout << "Open " << _demo_dir.c_str() << " folder error.\n";
@@ -284,8 +284,8 @@ class ImageReader: public IActor{
 			while (1)
 			{
 				i++;
-				if (i > 50)
-					_pause_flag = 1;
+				//if (i > 50)
+				//	_pause_flag = 1;
 				if (_pause_flag == 0)
 				{
 					if ((_ent = readdir (_dir)) != nullptr)
@@ -313,6 +313,12 @@ class ImageReader: public IActor{
 						//iframe->img.push_back(_img1.clone());
 						_out_queue->push(iframe);
 						std::this_thread::sleep_for(std::chrono::milliseconds(100));
+					}
+					else
+					{
+        					closedir (_dir);
+        					_dir = opendir(_demo_dir.c_str());
+						continue;
 					}
 					// release resurce
 					_img.release();
@@ -877,11 +883,13 @@ class YOLODetector: public IActor{
 			_sqrt = true;
 			_constriant = true;
 			_score_type = 0;
-			_nms = 0.5;
+			_nms = 0.4;
 			_score_threshold = 0.2;
 
 			_display_width = 480;
 			_display_height = 480;
+
+			_label_map_name = "/root/workspaces/vgg_yolo/label_map.txt";
 
 		}
 		~YOLODetector() {
@@ -902,6 +910,22 @@ class YOLODetector: public IActor{
 		void init() {
 			cout << "YOLODetector.init" << "\n";
 			cout << "YOLODetector initialization FC." <<"\n";	
+			cout << "YOLODetector load label." <<"\n";	
+			ifstream read(_label_map_name);
+			for (std::string line; std::getline(read, line); )
+			{
+				int pos = line.find(" ");
+				int label_id = std::stoi(line.substr(pos));
+				string label_name = line.substr(0, pos);	
+				_label_map[label_id] = label_name;
+				
+			}
+			cout << "YOLODetector label info." <<"\n";	
+			for (const auto& map: _label_map)
+			{
+				cout << "key:" << map.first << " label name:" << map.second << "\n";
+			}
+			
 		}
 		/*virtual*/
 		void operate() {
@@ -948,8 +972,10 @@ class YOLODetector: public IActor{
 							if (p_boxes[b].score_ > _score_threshold)
 							{
 
-								int centor_x = p_boxes[b].box_[0] * 224 - p_boxes[b].box_[0] * (224 / _side);
-								int centor_y = p_boxes[b].box_[1] * 224 - p_boxes[b].box_[1] * (224 / _side);
+								//int centor_x = p_boxes[b].box_[0] * 224 - p_boxes[b].box_[0] * (224 / _side);
+								//int centor_y = p_boxes[b].box_[1] * 224 - p_boxes[b].box_[1] * (224 / _side);
+								int centor_x = p_boxes[b].box_[0] * 224;
+								int centor_y = p_boxes[b].box_[1] * 224;
 
 								int width = p_boxes[b].box_[2] * 224;
 								int height = p_boxes[b].box_[3] * 224;
@@ -976,7 +1002,7 @@ class YOLODetector: public IActor{
 					for (BBOX_META box: _iframe->pred_vec)
 					{
 						std::stringstream ss;
-						ss << "label " << box.label << " score " << box.predictions;
+						ss << _label_map[box.label] << ":" << box.predictions;
 						if (box.top < 0)
 							box.top = 0;
 						if (box.left < 0)
@@ -989,7 +1015,7 @@ class YOLODetector: public IActor{
 						//cv::String info(ss.str());
 						int font_face = FONT_HERSHEY_SIMPLEX;
 						double font_scale = 0.4;
-						int thickness = 2;
+						int thickness = 1;
 						cv::Rect rect(box.left * scale_x, box.top * scale_y, box.width * scale_x, box.height * scale_y);
 						cv::Rect rect1(box.left * scale_x, box.top * scale_y, box.width * scale_x, 10 * scale_y);
 						cv::rectangle(_img, rect1, cv::Scalar(0, 255, 0), -1, 1, 0);
@@ -1153,6 +1179,8 @@ class YOLODetector: public IActor{
 		float _score_threshold;
 		int _display_width;
 		int _display_height;
+		string _label_map_name;
+		std::map<int, string> _label_map;
 
 
 		thread _thread;
