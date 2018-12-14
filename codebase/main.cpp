@@ -30,6 +30,9 @@
 // CaffeInferencer
 #include <caffe/caffe.hpp>
 
+#define CAFFE_IMG_INPUT_FLAG 0
+#define DEBUG_INFO_FLAG 0
+
 #define ImageQueue Queue<cv::Mat>
 #define StreamQueue Queue<std::ostream>
 #define DATA_PATH  "./";
@@ -78,8 +81,8 @@ typedef struct {
 	int left;
 	int width;
 	int height;
-	int label;
-	float predictions;
+	string label;
+	float score;
 } BBOX_META;
 
 class IFrame{
@@ -98,6 +101,13 @@ class IFrame{
 				assert( !image.data);	// check image is NULL
 			}
 			img.clear();
+
+			for (auto box: pred_vec)
+			{
+				delete box;
+				box = nullptr;
+			}
+			pred_vec.clear();
 			
 			cout << "IFrame Release buffer" << "\n";
 			if (buffer != nullptr)
@@ -108,7 +118,7 @@ class IFrame{
 		}
 	public:
 		std::vector<cv::Mat> img;
-		std::vector<BBOX_META> pred_vec;
+		std::vector<BBOX_META*> pred_vec;
 		int buffer_length;
 		float *buffer;
 };
@@ -180,7 +190,7 @@ class VideoReader: public IActor{
 			while (1)
 			{
 				i++;
-				if (i > 50)
+				if (i > 500)
 					_pause_flag = 1;
 				if (_pause_flag == 0)
 				{
@@ -312,7 +322,7 @@ class ImageReader: public IActor{
 						iframe->img.push_back(cv::Mat(_img1));
 						//iframe->img.push_back(_img1.clone());
 						_out_queue->push(iframe);
-						std::this_thread::sleep_for(std::chrono::milliseconds(100));
+						std::this_thread::sleep_for(std::chrono::milliseconds(500));
 					}
 					else
 					{
@@ -358,6 +368,8 @@ class ImageShower: public IActor{
 		ImageShower(ACTOR_ARG &actor_arg, FrameQueue &in_queue) {
 			_in_queue = &in_queue;
 			_window_name = actor_arg.disp_name;
+			_display_width = 480;
+			_display_height = 480;
 		}
 		~ImageShower() {
         		// release resurce
@@ -381,21 +393,47 @@ class ImageShower: public IActor{
 			cout << "ImageShower.op " << "\n";
 			while (1)
 			{
-				cout << "Queue.size:" << _in_queue->size() << " ... \n";
+				cout << "ImageShower Queue.size:" << _in_queue->size() << " ... \n";
 				if (_pause_flag == 0 || _in_queue->size() != 0)
 				{
 					_iframe = _in_queue->pop();
 
-					cout << "ImageShower _img.deallocate" << "\n";
+					_img = _iframe->img[0];
+					cout << "ImageShower prepare show" << "\n";
+					cv::resize(_img, _img, cv::Size(_display_width, _display_height));
+					int scale_x = _display_width / 224;
+					int scale_y = _display_height / 224;
+					for (BBOX_META* box: _iframe->pred_vec)
+					{
+						std::stringstream ss;
+						ss << box->label << ":" << box->score;
+						if (box->top < 0)
+							box->top = 0;
+						if (box->left < 0)
+							box->left = 0;
+						if (box->top + box->height > 224)
+							box->height = 220 - box->top;
+						if (box->width + box->left > 224)
+							box->width = 220 - box->left;
+							
+						//cv::String info(ss.str());
+						int font_face = FONT_HERSHEY_SIMPLEX;
+						double font_scale = 0.4;
+						int thickness = 1;
+						cv::Rect rect(box->left * scale_x, box->top * scale_y, box->width * scale_x, box->height * scale_y);
+						cv::Rect rect1(box->left * scale_x, box->top * scale_y, box->width * scale_x, 10 * scale_y);
+						cv::rectangle(_img, rect1, cv::Scalar(0, 255, 0), -1, 1, 0);
+						cv::putText(_img, ss.str(), cv::Point(rect1.x + 5, rect1.y + 15), font_face, font_scale, cv::Scalar(255, 255, 255), thickness);
+						cv::rectangle(_img, rect, cv::Scalar(0, 255, 0), 1, 1, 0);
+					}
+					cv::imshow(_window_name, _img);
+					cv::waitKey(1);
 
+					cout << "ImageShower _img.deallocate" << "\n";
         				// release resurce
 					_img.deallocate();
 					_img.release();
 					assert( !_img.data);
-
-					_img = _iframe->img[0];
-					cv::imshow(_window_name, _img);
-					cv::waitKey(10);
 
         				// release resurce
 					delete _iframe;
@@ -413,6 +451,8 @@ class ImageShower: public IActor{
 	private:
 		FrameQueue* _in_queue;
 		string _window_name;
+		int _display_width;
+		int _display_height;
 		thread _thread;
 
 		bool _pause_flag;
@@ -551,6 +591,11 @@ class GTIInferencer: public IActor{
 			{
 				cout << "GTIInferencer allocation (_input_image_buffer) failed." << "\n";
 			}
+			_input_image_float_buffer = new float[_gti_input_image_width * _gti_input_image_height * _gti_input_image_channel];
+			if ( !_input_image_float_buffer)
+			{
+				cout << "GTIInferencer allocation (_input_image_float_buffer) failed." << "\n";
+			}
 						
 		}
 		/*virtual*/
@@ -566,15 +611,15 @@ class GTIInferencer: public IActor{
 					
 					cv::Mat img(iframe->img[0]);
 					cv::Mat output(iframe->img[0]);
-					//std::vector<cv::Mat> input_image;
-					cv::Mat input_image;
+					std::vector<cv::Mat> input_image;
+					//cv::Mat input_image;
 					// converts input image to the float point 3 channel image.
-					//cnnSvicProc32FC3(img, &input_image);
 					cout << "GTIInferencer img CV_8U convertTo CV_32F !" << "\n";
-					img.convertTo(input_image, CV_32F);
+					//img.convertTo(input_image, CV_32F);
+					cnnSvicProc32FC3(img, &input_image);
 					// converts 32 bit float format image to 8 bit integer format image. 
 					cout << "GTIInferencer img 32F convertTo 8Byte !" << "\n";
-					cvt32FloatTo8Byte((float *)input_image.data, (uchar *)_input_image_buffer, _gti_input_image_width, _gti_input_image_height, _gti_input_image_channel);
+					cvt32FloatTo8Byte((float *)input_image[0].data, (uchar *)_input_image_buffer, _gti_input_image_width, _gti_input_image_height, _gti_input_image_channel);
 
 					cout << "GTIInferencer Create _nn_output_buffer !" << "\n";					
 					float *_nn_output_buffer = new float[GtiGetOutputLength(_device)];
@@ -589,7 +634,8 @@ class GTIInferencer: public IActor{
 					
 					img.release();
 					output.release();
-					input_image.release();
+					for (cv::Mat image: input_image)
+						image.release();
 
 					iframe->buffer = _nn_output_buffer;
 					iframe->buffer_length = GtiGetOutputLength(_device);
@@ -603,6 +649,88 @@ class GTIInferencer: public IActor{
 		/*virtual*/
 		void operation() {
 			_thread = thread( &IActor::operate, this);
+		}
+
+		//====================================================================
+		// Function name: void cnnSvicProc32FC3(const cv::Mat& img,
+		//                          std::vector<cv::Mat>* input_channels)
+		// This function converts input image to the float point 3 channel image.
+			//
+		// Input: const cv::Mat& img - input image.
+		//        std::vector<cv::Mat>* input_channels - output buffer to store
+		//              float point 3 channel image.
+		// return: none.
+		//====================================================================
+		void cnnSvicProc32FC3(const cv::Mat& img, std::vector<cv::Mat>* input_channels)
+		{
+		    cv::Mat sample;
+		    cv::Mat sample_resized;
+		    cv::Mat sample_byte;
+		    cv::Mat sample_normalized;
+
+		    const int num_channels = _gti_input_image_channel;
+		    int width = _gti_input_image_width;
+		    int height = _gti_input_image_height;
+		    float *input_data = _input_image_float_buffer;
+		    if (input_data == NULL)
+		    {
+			std::cout << "Failed allocat memory for input_data!" << std::endl;
+			return;
+		    }
+
+		    for (int i = 0; i < num_channels; ++i)
+		    {
+			cv::Mat channel(height, width, CV_32FC1, input_data);
+			input_channels->push_back(channel);
+			input_data += width * height;
+		    }
+
+		    sample = img;
+		    switch (img.channels())
+		    {
+		    case 1:
+			if (num_channels == 3)
+			{
+			    cv::cvtColor(img, sample, cv::COLOR_GRAY2BGR);
+			}
+			break;
+		    case 3:
+			if (num_channels == 1)
+			{
+			    cv::cvtColor(img, sample, cv::COLOR_BGR2GRAY);
+			}
+			break;
+		    case 4:
+			if (num_channels == 1)
+			{
+			    cv::cvtColor(img, sample, cv::COLOR_BGRA2GRAY);
+			}
+			else if (num_channels == 3)
+			{
+			    cv::cvtColor(img, sample, cv::COLOR_BGRA2BGR);
+			}
+			break;
+		    default:
+			break;
+		    }
+
+		    sample_resized = sample;
+
+		    if (num_channels == 3)
+		    {
+			sample_resized.convertTo(sample_byte, CV_32FC3);
+		    }
+		    else
+		    {
+			sample_resized.convertTo(sample_byte, CV_32FC1);
+		    }
+
+		    cv::subtract(sample_byte, cv::Scalar(0., 0., 0.), sample_normalized);
+
+		    /* This operation will write the separate BGR planes directly to the
+		     * input layer of the network because it is wrapped by the cv::Mat
+		     * objects in input_channels. */
+		    cv::split(sample_normalized, *input_channels);
 		}
 
 		//====================================================================
@@ -659,7 +787,8 @@ class GTIInferencer: public IActor{
 
 		GtiDevice *_device;
 		float *_output_image_buffer;
-		unsigned char* _input_image_buffer; 
+		float *_input_image_float_buffer;
+		unsigned char *_input_image_buffer; 
 
 		bool _pause_flag;
 };
@@ -790,7 +919,7 @@ class CaffeInferencer: public IActor{
 					_iframe = _in_queue->pop();
 					
 					
-
+#if CAFFE_IMG_INPUT_FLAG
 					// Wrap the input layer of the network in separate cv::Mat objects
 					cout << "CaffeInferencer  Wrap the input layer !" << "\n";
 					std::vector<cv::Mat> input_channels;
@@ -820,7 +949,14 @@ class CaffeInferencer: public IActor{
 					 * objects in input_channels. 
 					 */
 					cv::split(input_image, input_channels);
-
+#else
+					float *nn_output_buffer = _iframe->buffer;
+					float *input_data = _input_layer->mutable_cpu_data();
+					cout << "CaffeInferencer  feed buffer to Caffe  !" <<  "\n";
+					for (int i = 0;i < _iframe->buffer_length; ++i) {
+						input_data[i] = nn_output_buffer[i]; 
+					}
+#endif
 					cout << "CaffeInferencer Forward  !" << "\n";
 					// Caffe Inference
 					_net->Forward();
@@ -840,8 +976,10 @@ class CaffeInferencer: public IActor{
 					_iframe->buffer_length = net_result.size();
 					_out_queue->push(_iframe);
 					
+#if CAFFE_IMG_INPUT_FLAG
 					output.release();
 					input_image.release();
+#endif
 				}
 				else
 					break;
@@ -885,9 +1023,6 @@ class YOLODetector: public IActor{
 			_score_type = 0;
 			_nms = 0.4;
 			_score_threshold = 0.2;
-
-			_display_width = 480;
-			_display_height = 480;
 
 			_label_map_name = "/root/workspaces/vgg_yolo/label_map.txt";
 
@@ -981,55 +1116,29 @@ class YOLODetector: public IActor{
 								int height = p_boxes[b].box_[3] * 224;
 								int top = centor_y - height / 2;
 								int left = centor_x - width / 2;
-	
+#if DEBUG_INFO_FLAG	
 								cout << "YOLODetector p_boxes[b].label: " << p_boxes[b].label_ << "\n";
 								cout << "YOLODetector p_boxes[b].score: " << p_boxes[b].score_ << "\n";
 								cout << "YOLODetector p_boxes[b].top: " << top << "\n";
 								cout << "YOLODetector p_boxes[b].left: " << left << "\n";
 								cout << "YOLODetector p_boxes[b].width: " << width << "\n";
 								cout << "YOLODetector p_boxes[b].height: " << height << "\n";
-
-								BBOX_META mdata = {top, left, width, height, label, p_boxes[b].score_};
-								_iframe->pred_vec.push_back(mdata); 
+#endif
+								BBOX_META *bbox_data = new BBOX_META{top, left, width, height, _label_map[label], p_boxes[b].score_};
+								_iframe->pred_vec.push_back(bbox_data); 
 							}
 						}
 						++pred_count;
 					}
 					
-					cv::resize(_img, _img, cv::Size(_display_width, _display_height));
-					int scale_x = _display_width / 224;
-					int scale_y = _display_height / 224;
-					for (BBOX_META box: _iframe->pred_vec)
-					{
-						std::stringstream ss;
-						ss << _label_map[box.label] << ":" << box.predictions;
-						if (box.top < 0)
-							box.top = 0;
-						if (box.left < 0)
-							box.left = 0;
-						if (box.top + box.height > 224)
-							box.height = 220 - box.top;
-						if (box.width + box.left > 224)
-							box.width = 220 - box.left;
-							
-						//cv::String info(ss.str());
-						int font_face = FONT_HERSHEY_SIMPLEX;
-						double font_scale = 0.4;
-						int thickness = 1;
-						cv::Rect rect(box.left * scale_x, box.top * scale_y, box.width * scale_x, box.height * scale_y);
-						cv::Rect rect1(box.left * scale_x, box.top * scale_y, box.width * scale_x, 10 * scale_y);
-						cv::rectangle(_img, rect1, cv::Scalar(0, 255, 0), -1, 1, 0);
-						cv::putText(_img, ss.str(), cv::Point(rect1.x + 5, rect1.y + 15), font_face, font_scale, cv::Scalar(255, 255, 255), thickness);
-						cv::rectangle(_img, rect, cv::Scalar(0, 255, 0), 1, 1, 0);
-					}
-					cv::imshow(window_name, _img);
-					cv::waitKey(50);
 
-					cout << "YOLODetector Release iframe !" << "\n";
+
+					_out_queue->push(_iframe);
+					//cout << "YOLODetector Release iframe !" << "\n";
         				// release resurce
-					delete _iframe;
-					_iframe = nullptr;
-					assert( !_iframe);
+					//delete _iframe;
+					//_iframe = nullptr;
+					//assert( !_iframe);
 				}
 				else
 					break;
@@ -1177,8 +1286,6 @@ class YOLODetector: public IActor{
 		int _score_type;
 		float _nms;
 		float _score_threshold;
-		int _display_width;
-		int _display_height;
 		string _label_map_name;
 		std::map<int, string> _label_map;
 
@@ -1344,23 +1451,60 @@ int main() {
 	ACTOR_ARG actorARG[] =
 	{
 		{(char *)"video_reader", (char *)"", (char *)"./video_test/VideoDemoFastestMP4.mp4", 224, 224},
-		{(char *)"image_reader", (char *)"", (char *)"./image_test", 224, 224},
-		{(char *)"gti_inferencer", (char *)"", (char *)"", 0, 0, 224, 224, 3, gti_device_type, (char*)"0", (char*)"/usr/local/GTISDK/data/Models/gti2801/gnet1/cnn/gnet1_coef_vgg16.dat", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/cnn/userinput.txt"},
 		{(char *)"gti_fc_classifier", (char *)"", (char *)"", 0, 0, 224, 224, 3, 0, (char *)"0", (char *)"", (char *)"", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/fc/picture_coef.bin", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/fc/picture_label.txt"},
 		{(char *)"caffe_inferencer", (char *)"", (char *)"", 0, 0, 0, 0, 0, 0, (char *)"0", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"/root/workspaces/vgg_yolo/gnet_deploy.prototxt", (char *)"/root/workspaces/vgg_yolo/gnet_yolo_iter_32000.caffemodel", (char *)"", (char *)"" },
 		{(char *)"yolo_detector", (char *)"", (char *)"", 0, 0, 0, 0, 0, 0, (char *)"0", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"" },
 		{(char *)"image_shower", (char *)"disp3", (char *)"", 0, 0}
 	};
-	FrameQueue  m_queue;
+	ACTOR_ARG actorARG0[] =
+	{
+		{(char *)"video_reader", (char *)"", (char *)"./video_test/VideoDemoFastestMP4.mp4", 224, 224},
+		{(char *)"video_reader", (char *)"", (char *)"./video_test/video1.mp4", 224, 224},
+		{(char *)"video_reader", (char *)"", (char *)"./video_test/video2.mp4", 224, 224},
+		{(char *)"video_reader", (char *)"", (char *)"./video_test/video3.mp4", 224, 224},
+		{(char *)"video_reader", (char *)"", (char *)"./video_test/video4.mp4", 224, 224},
+		{(char *)"video_reader", (char *)"", (char *)"./video_test/video5.mp4", 224, 224},
+		{(char *)"video_reader", (char *)"", (char *)"./video_test/video6.mp4", 224, 224},
+		{(char *)"video_reader", (char *)"", (char *)"./video_test/video7.mp4", 224, 224},
+	};
+	ACTOR_ARG actorARG1[] =
+	{
+		{(char *)"gti_inferencer", (char *)"", (char *)"", 0, 0, 224, 224, 3, gti_device_type, (char*)"0", (char*)"/root/workspaces/vgg_yolo/gnet1_coef_vgg16.dat", (char *)"/root/workspaces/vgg_yolo/userinput.txt"},
+		{(char *)"gti_inferencer", (char *)"", (char *)"", 0, 0, 224, 224, 3, gti_device_type, (char*)"1", (char*)"/root/workspaces/vgg_yolo/gnet1_coef_vgg16.dat", (char *)"/root/workspaces/vgg_yolo/userinput.txt"},
+		{(char *)"gti_inferencer", (char *)"", (char *)"", 0, 0, 224, 224, 3, gti_device_type, (char*)"2", (char*)"/root/workspaces/vgg_yolo/gnet1_coef_vgg16.dat", (char *)"/root/workspaces/vgg_yolo/userinput.txt"},
+		{(char *)"gti_inferencer", (char *)"", (char *)"", 0, 0, 224, 224, 3, gti_device_type, (char*)"3", (char*)"/root/workspaces/vgg_yolo/gnet1_coef_vgg16.dat", (char *)"/root/workspaces/vgg_yolo/userinput.txt"},
+	};
+
+
+	FrameQueue  g1_queue;
+	FrameQueue  g2_queue;
+	FrameQueue  g3_queue;
+	FrameQueue  g4_queue;
+
 	FrameQueue  n_queue;
 	FrameQueue  p_queue;
+	FrameQueue  q_queue;
 
 
 	ActorFactory *actor_factory = new ConcreteActorFactory();
 	ActorComponent *slideshow = (new ActorDecorator_1st())->addcomponent(
-			actor_factory->createActorComponent(actorARG[5], n_queue, p_queue))->addcomponent(
-			actor_factory->createActorComponent(actorARG[4], m_queue, n_queue))->addcomponent(
-			actor_factory->createActorComponent(actorARG[1], m_queue)
+			actor_factory->createActorComponent(actorARG[4], q_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG[3], p_queue, q_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG[2], n_queue, p_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG[2], n_queue, p_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG[2], n_queue, p_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG1[3], g4_queue, n_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG1[2], g3_queue, n_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG1[1], g2_queue, n_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG1[0], g1_queue, n_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG0[7], g4_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG0[6], g3_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG0[5], g2_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG0[4], g1_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG0[3], g4_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG0[2], g3_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG0[1], g2_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG0[0], g1_queue)
 			);
 	//ActorComponent *slideshow = (new ActorDecorator_1st())->addcomponent(
 	//		actor_factory->createActorComponent(actorARG[5], m_queue))->addcomponent(
