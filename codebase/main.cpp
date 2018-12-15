@@ -30,6 +30,15 @@
 // CaffeInferencer
 #include <caffe/caffe.hpp>
 
+// For cv human detector
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/objdetect/objdetect.hpp>
+#include <opencv2/highgui/highgui.hpp>
+
+// For GetTickCount
+#include <time.h>
+
+
 #define CAFFE_IMG_INPUT_FLAG 0
 #define DEBUG_INFO_FLAG 0
 
@@ -40,6 +49,15 @@
 using namespace std;
 using namespace cv;
 using namespace caffe;  // NOLINT(build/namespaces)
+
+
+double GetTickCount(void) 
+{
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now))
+    return 0;
+  return now.tv_sec * 1000.0 + now.tv_nsec / 1000000.0;
+}
 
 class BoxData {
  public:
@@ -1319,6 +1337,123 @@ class ActorDecorator: public ActorComponent {
 		vector<ActorComponent*> _actor_component_vec;
 };
 
+class HumanDetector: public IActor{
+	public:
+		HumanDetector(ACTOR_ARG &actor_arg, FrameQueue &in_queue, FrameQueue &out_queue) {
+			_in_queue = &in_queue;
+			_out_queue = &out_queue;
+
+			_hitThreshold = 0;
+			_winStride_x = 8;
+			_winStride_y = 8;
+			_padding_x = 32;
+			_padding_y = 32;
+			_scale = 1.05;
+			_finalThreshold = 1.0;
+		}
+		~HumanDetector() {
+			while (_thread.joinable())
+				_thread.join();
+
+			_img.release();
+			assert( !_img.data);
+
+        		// release resurce
+			delete _iframe;
+			_iframe = nullptr;
+			assert( !_iframe);
+			// Release YOLODetector
+			cout << "del_HumanDetector" << '\n';
+		}
+		/*virtual*/
+		void init() {
+			cout << "HumanDetector.init" << "\n";
+			cout << "HumanDetector initialization Detector." <<"\n";	
+			_hog = new HOGDescriptor();
+			_hog->setSVMDetector(HOGDescriptor::getDefaultPeopleDetector());
+			//namedWindow("people detector", 1);
+			
+		}
+		/*virtual*/
+		void operate() {
+			cout << "HumanDetector.op " << "\n";
+			string window_name = "test";
+			while (1)
+			{
+
+				cout << "HumanDetector Queue.size:" << _in_queue->size() << " ... \n";
+				if (_pause_flag == 0 || _in_queue->size() != 0)
+				{
+					cout << "HumanDetector  prepare image!" << "\n";
+					_iframe = _in_queue->pop();
+
+					_img = _iframe->img[0];
+
+					vector<Rect> found, found_filtered;
+					cout << "HumanDetector  detecting!" << "\n";
+					double t = (double)getTickCount();
+					_hog->detectMultiScale(_img, found, _hitThreshold, Size(_winStride_x, _winStride_y), Size(_padding_x, _padding_y), _scale, _finalThreshold);
+					t = (double)getTickCount() - t;
+					printf("tdetection time = %gms\n", t*1000./cv::getTickFrequency());
+
+					size_t i, j;
+					for( i = 0; i < found.size(); i++ )
+					{
+						Rect r = found[i];
+						for( j = 0; j < found.size(); j++ )
+							if( j != i && (r & found[j]) == r)
+								break;
+						if( j == found.size() )
+							found_filtered.push_back(r);
+					}
+					for( i = 0; i < found_filtered.size(); i++ )
+					{
+						Rect r = found_filtered[i];
+						// the HOG detector returns slightly larger rectangles than the real objects.
+						// so we slightly shrink the rectangles to get a nicer output.
+						r.x += cvRound(r.width*0.1);
+						r.width = cvRound(r.width*0.8);
+						r.y += cvRound(r.height*0.07);
+						r.height = cvRound(r.height*0.8);
+
+						BBOX_META *bbox_data = new BBOX_META{r.x, r.y, r.width, r.height, "people", 1.0};
+						_iframe->pred_vec.push_back(bbox_data); 
+					}
+					_out_queue->push(_iframe);
+					//cout << "HumanDetector Release iframe !" << "\n";
+        				// release resurce
+					//delete _iframe;
+					//_iframe = nullptr;
+					//assert( !_iframe);
+				}
+				else
+					break;
+			}
+		}
+		/*virtual*/
+		void operation() {
+			_thread = thread( &IActor::operate, this);
+		}
+		
+	private:
+		FrameQueue *_in_queue;
+		FrameQueue *_out_queue;
+
+		double _hitThreshold;
+		int _winStride_x;
+		int _winStride_y;
+		int _padding_x;
+		int _padding_y;
+		double _scale;
+		double _finalThreshold;
+		HOGDescriptor *_hog;
+		thread _thread;
+
+		bool _pause_flag;
+		IFrame* _iframe;
+		cv::Mat _img;
+};
+
 class ActorDecorator_1st: public ActorDecorator {
 	public:
 		ActorDecorator_1st(): ActorDecorator(){
@@ -1372,6 +1507,13 @@ class ConcreteActorFactory: public ActorFactory{
 			if (actor_arg.name == "yolo_detector")
 			{
 				IActor *actor = new YOLODetector(actor_arg, in_queue, out_queue);
+				cout << "init " << actor_arg.name << "\n"; 
+				actor->init();
+				return actor;
+			}
+			if (actor_arg.name == "human_detector")
+			{
+				IActor *actor = new HumanDetector(actor_arg, in_queue, out_queue);
 				cout << "init " << actor_arg.name << "\n"; 
 				actor->init();
 				return actor;
@@ -1454,8 +1596,10 @@ int main() {
 		{(char *)"gti_fc_classifier", (char *)"", (char *)"", 0, 0, 224, 224, 3, 0, (char *)"0", (char *)"", (char *)"", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/fc/picture_coef.bin", (char *)"/usr/local/GTISDK/data/Models/gti2801/gnet1/fc/picture_label.txt"},
 		{(char *)"caffe_inferencer", (char *)"", (char *)"", 0, 0, 0, 0, 0, 0, (char *)"0", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"/root/workspaces/vgg_yolo/gnet_deploy.prototxt", (char *)"/root/workspaces/vgg_yolo/gnet_yolo_iter_32000.caffemodel", (char *)"", (char *)"" },
 		{(char *)"yolo_detector", (char *)"", (char *)"", 0, 0, 0, 0, 0, 0, (char *)"0", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"", (char *)"" },
-		{(char *)"image_shower", (char *)"disp3", (char *)"", 0, 0}
+		{(char *)"image_shower", (char *)"disp3", (char *)"", 0, 0},
+		{(char *)"human_detector", (char *)"", (char *)"", 0, 0}
 	};
+
 	ACTOR_ARG actorARG0[] =
 	{
 		{(char *)"video_reader", (char *)"", (char *)"./video_test/VideoDemoFastestMP4.mp4", 224, 224},
@@ -1466,7 +1610,8 @@ int main() {
 		{(char *)"video_reader", (char *)"", (char *)"./video_test/video5.mp4", 224, 224},
 		{(char *)"video_reader", (char *)"", (char *)"./video_test/video6.mp4", 224, 224},
 		{(char *)"video_reader", (char *)"", (char *)"./video_test/video7.mp4", 224, 224},
-	};
+        };
+
 	ACTOR_ARG actorARG1[] =
 	{
 		{(char *)"gti_inferencer", (char *)"", (char *)"", 0, 0, 224, 224, 3, gti_device_type, (char*)"0", (char*)"/root/workspaces/vgg_yolo/gnet1_coef_vgg16.dat", (char *)"/root/workspaces/vgg_yolo/userinput.txt"},
@@ -1487,6 +1632,14 @@ int main() {
 
 
 	ActorFactory *actor_factory = new ConcreteActorFactory();
+	// video + cv human detector
+	ActorComponent *slideshow = (new ActorDecorator_1st())->addcomponent(
+			actor_factory->createActorComponent(actorARG[4], n_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG[5], g1_queue, n_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG0[0], g1_queue)
+			);
+
+	/* 8 video + CHIP + CAFFE_YOLO
 	ActorComponent *slideshow = (new ActorDecorator_1st())->addcomponent(
 			actor_factory->createActorComponent(actorARG[4], q_queue))->addcomponent(
 			actor_factory->createActorComponent(actorARG[3], p_queue, q_queue))->addcomponent(
@@ -1506,10 +1659,14 @@ int main() {
 			actor_factory->createActorComponent(actorARG0[1], g2_queue))->addcomponent(
 			actor_factory->createActorComponent(actorARG0[0], g1_queue)
 			);
-	//ActorComponent *slideshow = (new ActorDecorator_1st())->addcomponent(
-	//		actor_factory->createActorComponent(actorARG[5], m_queue))->addcomponent(
-	//		actor_factory->createActorComponent(actorARG[0], m_queue)
-	//		);
+	*/
+
+	/* pure video frame show
+	ActorComponent *slideshow = (new ActorDecorator_1st())->addcomponent(
+			actor_factory->createActorComponent(actorARG[5], m_queue))->addcomponent(
+			actor_factory->createActorComponent(actorARG[0], m_queue)
+			);
+	*/
 
 
 	slideshow->operation();
